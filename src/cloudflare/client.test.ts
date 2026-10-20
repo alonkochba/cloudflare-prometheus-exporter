@@ -219,6 +219,97 @@ describe("CloudflareMetricsClient", () => {
 		).rejects.toMatchObject({ code: ErrorCode.GRAPHQL_FIELD_ACCESS });
 	});
 
+	it("counts requests by method and eyeball requests by cache status in one query", async () => {
+		let calls = 0;
+		const client = createClient(async (input, init) => {
+			calls++;
+			const body = z
+				.object({ query: z.string() })
+				.parse(await new Request(input, init).json());
+			expect(body.query).toMatch(
+				/cacheStatus: httpRequestsAdaptiveGroups\([^)]*requestSource:\s*"eyeball"/,
+			);
+			return Response.json({
+				data: {
+					viewer: {
+						zones: [
+							{
+								zoneTag: "zone-id",
+								httpRequestsAdaptiveGroups: [
+									{
+										count: 5,
+										dimensions: { clientRequestHTTPMethodName: "GET" },
+									},
+								],
+								cacheStatus: [
+									{ count: 6, dimensions: { cacheStatus: "hit" } },
+									{ count: 3, dimensions: { cacheStatus: "stream_hit" } },
+									{ count: 0, dimensions: { cacheStatus: "miss" } },
+								],
+							},
+						],
+					},
+				},
+			});
+		});
+
+		const metrics = await client.getZoneMetrics(
+			"request-method-metrics",
+			["zone-id"],
+			[
+				{
+					id: "zone-id",
+					name: "example.com",
+					status: "active",
+					plan: { id: "paid", name: "Paid" },
+					account: { id: "account-id", name: "Account" },
+				},
+			],
+			{},
+			{
+				mintime: "2026-01-01T00:00:00Z",
+				maxtime: "2026-01-01T00:01:00Z",
+			},
+		);
+
+		const byName = (name: string) =>
+			metrics.find((metric) => metric.name === name)?.values;
+		expect(calls).toBe(1);
+		expect(byName("cloudflare_zone_requests_by_method_total")).toEqual([
+			{ labels: { zone: "example.com", method: "GET" }, value: 5 },
+		]);
+		expect(byName("cloudflare_zone_requests_cache_status_total")).toEqual([
+			{ labels: { zone: "example.com", cache_status: "hit" }, value: 6 },
+			{ labels: { zone: "example.com", cache_status: "stream_hit" }, value: 3 },
+		]);
+	});
+
+	it("counts only eyeball requests in hostname cache status", async () => {
+		let query = "";
+		const client = createClient(async (input, init) => {
+			query = z
+				.object({ query: z.string() })
+				.parse(await new Request(input, init).json()).query;
+			return Response.json({ data: { viewer: { zones: [] } } });
+		});
+
+		await client.getZoneMetrics(
+			"hostname-http-metrics",
+			["zone-id"],
+			[],
+			{},
+			{
+				mintime: "2026-01-01T00:00:00Z",
+				maxtime: "2026-01-01T00:01:00Z",
+			},
+			new Set(["example.com"]),
+		);
+
+		expect(query).toMatch(
+			/hostCache: httpRequestsAdaptiveGroups\([^)]*requestSource:\s*"eyeball"/,
+		);
+	});
+
 	it("allows a successful query with no observations", async () => {
 		const fetch: typeof globalThis.fetch = async () =>
 			new Response(JSON.stringify({ data: { viewer: { accounts: [] } } }), {

@@ -737,6 +737,19 @@ export const RequestMethodMetricsQuery = graphql(`
             clientRequestHTTPMethodName
           }
         }
+        cacheStatus: httpRequestsAdaptiveGroups(
+          limit: $limit
+          filter: {
+            datetime_geq: $mintime
+            datetime_lt: $maxtime
+            requestSource: "eyeball"
+          }
+        ) {
+          count
+          dimensions {
+            cacheStatus
+          }
+        }
       }
     }
   }
@@ -815,6 +828,7 @@ export const HostnameHttpMetricsQuery = graphql(`
             datetime_geq: $mintime
             datetime_lt: $maxtime
             clientRequestHTTPHost_in: $hosts
+            requestSource: "eyeball"
           }
         ) {
           count
