@@ -451,4 +451,92 @@ describe("CloudflareMetricsClient", () => {
 			),
 		).rejects.toMatchObject({ code: ErrorCode.GRAPHQL_FIELD_ACCESS });
 	});
+
+	const paidZone = {
+		id: "zone-id",
+		name: "example.com",
+		status: "active",
+		plan: { id: "paid", name: "Paid" },
+		account: { id: "account-id", name: "Account" },
+	};
+	const oneMinute = {
+		mintime: "2026-01-01T00:00:00.000Z",
+		maxtime: "2026-01-01T00:01:00.000Z",
+	};
+
+	describe("excludeLabels", () => {
+		const originStatusResponse = () =>
+			Response.json({
+				data: {
+					viewer: {
+						zones: [
+							{
+								zoneTag: "zone-id",
+								httpRequestsAdaptiveGroups: [
+									{
+										count: 2,
+										dimensions: {
+											originResponseStatus: 200,
+											clientCountryName: "US",
+											clientRequestHTTPHost: "a.example.com",
+										},
+									},
+									{
+										count: 5,
+										dimensions: {
+											originResponseStatus: 200,
+											clientCountryName: "US",
+											clientRequestHTTPHost: "b.example.com",
+										},
+									},
+								],
+							},
+						],
+					},
+				},
+			});
+
+		it("sums counters across the dropped label", async () => {
+			const client = createClient(async () => originStatusResponse());
+
+			const metrics = await client.getZoneMetrics(
+				"origin-status-metrics",
+				["zone-id"],
+				[paidZone],
+				{},
+				oneMinute,
+				undefined,
+				undefined,
+				false,
+				false,
+				new Set(["host"]),
+			);
+
+			expect(metrics[0]?.values).toEqual([
+				{
+					labels: { zone: "example.com", origin_status: "200", country: "US" },
+					value: 7,
+				},
+			]);
+		});
+
+		it("never stores the dropped label in packed storage", async () => {
+			const client = createClient(async () => originStatusResponse());
+
+			const [family] = await client.getPackedZoneMetrics(
+				"origin-status-metrics",
+				["zone-id"],
+				[paidZone],
+				{},
+				oneMinute,
+				undefined,
+				undefined,
+				false,
+				new Set(["host"]),
+			);
+
+			expect(family?.direct?.labels).not.toContain("host");
+			expect(family?.direct?.zones.get("example.com")?.values).toEqual([7]);
+		});
+	});
 });

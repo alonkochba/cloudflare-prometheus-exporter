@@ -34,6 +34,11 @@ class ObservationValues extends Array<MetricValue> {
 export class ColumnarObservationSink {
 	private readonly families = new Map<string, ColumnarObservedFamily>();
 
+	/** @param excludeLabels Labels never stored; rows that collide are merged. */
+	constructor(
+		private readonly excludeLabels: ReadonlySet<string> = new Set(),
+	) {}
+
 	capture(metrics: readonly MetricDefinition[]) {
 		for (const metric of metrics) {
 			let family = this.families.get(metric.name);
@@ -66,7 +71,10 @@ export class ColumnarObservationSink {
 
 	private add(family: ColumnarObservedFamily, sample: MetricValue) {
 		const discovered = Object.keys(sample.labels).filter(
-			(label) => label !== "zone" && !family.labels.includes(label),
+			(label) =>
+				label !== "zone" &&
+				!this.excludeLabels.has(label) &&
+				!family.labels.includes(label),
 		);
 		if (discovered.length > 0) {
 			family.labels.push(...discovered);
