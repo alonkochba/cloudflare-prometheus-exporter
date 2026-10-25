@@ -142,7 +142,7 @@ const WORKER_METRICS = {
 // | `EdgeCountryMetricsQuery` | 3 | Edge status by country/host + error rate |
 // | `ColoMetricsQuery` | 3 | Colo traffic |
 // | `ColoErrorMetricsQuery` | 3 | Colo errors |
-// | `RequestMethodMetricsQuery` | 1 | HTTP methods |
+// | `RequestMethodMetricsQuery` | 2 | HTTP methods, cache status |
 // | `HealthCheckMetricsQuery` | 2 | Health checks |
 // | `WorkerTotalsQuery` | 4 | Account-level workers |
 // | `LoadBalancerMetricsQuery` | 2 | LB health/requests |
@@ -2479,7 +2479,7 @@ export class CloudflareMetricsClient {
 	}
 
 	/**
-	 * Requests by HTTP method.
+	 * Requests by HTTP method, and eyeball requests by cache status.
 	 *
 	 * @param zoneIds Zone IDs to query.
 	 * @param zones Zone metadata for label mapping.
@@ -2510,7 +2510,13 @@ export class CloudflareMetricsClient {
 			type: "counter",
 			values: [],
 		};
-		observationSink?.capture([methodCount]);
+		const cacheStatusCount: MetricDefinition = {
+			name: "cloudflare_zone_requests_cache_status_total",
+			help: "Eyeball requests by cache status",
+			type: "counter",
+			values: [],
+		};
+		observationSink?.capture([methodCount, cacheStatusCount]);
 
 		for (const zoneData of result.data?.viewer?.zones ?? []) {
 			const zoneName = findZoneName(zoneData.zoneTag, zones);
@@ -2526,9 +2532,21 @@ export class CloudflareMetricsClient {
 					});
 				}
 			}
+
+			for (const group of zoneData.cacheStatus ?? []) {
+				if (group.count != null && group.count > 0) {
+					cacheStatusCount.values.push({
+						labels: {
+							zone: zoneName,
+							cache_status: group.dimensions?.cacheStatus ?? "",
+						},
+						value: group.count,
+					});
+				}
+			}
 		}
 
-		return methodCount.values.length > 0 ? [methodCount] : [];
+		return [methodCount, cacheStatusCount].filter((m) => m.values.length > 0);
 	}
 
 	/**
@@ -2763,7 +2781,7 @@ export class CloudflareMetricsClient {
 		};
 		const hostnameCacheStatus: MetricDefinition = {
 			name: "cloudflare_zone_hostname_cache_status",
-			help: "Requests per hostname by cache status in the last completed minute",
+			help: "Eyeball requests per hostname by cache status in the last completed minute",
 			type: "gauge",
 			values: [],
 		};

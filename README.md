@@ -223,6 +223,7 @@ curl -X DELETE https://your-worker.workers.dev/config
 | `cloudflare_zone_requests_origin_status_country_host_total` | counter | zone, origin_status, country, host |
 | `cloudflare_zone_requests_status_country_host_total` | counter | zone, edge_status, country, host |
 | `cloudflare_zone_requests_by_method_total` | counter | zone, method |
+| `cloudflare_zone_requests_cache_status_total` | counter | zone, cache_status |
 
 ### Zone Bandwidth Metrics
 
@@ -321,6 +322,16 @@ curl -X DELETE https://your-worker.workers.dev/config
 |--------|------|--------|
 | `cloudflare_zone_cache_hit_ratio` | gauge | zone |
 | `cloudflare_zone_cache_miss_origin_duration_seconds` | gauge | zone, country, host |
+
+`cloudflare_zone_cache_hit_ratio` divides cached requests by all requests, so traffic that can never be cached (`dynamic`, `bypass`, `none`) pulls it down. For the hit ratio of cache-eligible requests only, derive it from `cloudflare_zone_requests_cache_status_total`:
+
+```promql
+sum by (zone) (rate(cloudflare_zone_requests_cache_status_total{cache_status=~"hit|updating|stale|revalidated"}[5m]))
+/
+sum by (zone) (rate(cloudflare_zone_requests_cache_status_total{cache_status=~"hit|updating|stale|revalidated|miss|expired"}[5m]))
+```
+
+`cloudflare_zone_requests_cache_status_total` and `cloudflare_zone_hostname_cache_status` count `eyeball` requests only: Worker subrequests and Early Hints lookups are reported as separate requests with their own cache status. Both are sampled (adaptive) counts and won't exactly match `cloudflare_zone_requests_total`.
 
 ### Bot Metrics
 
@@ -446,7 +457,7 @@ All hostname metrics are **gauge snapshots** of the **last completed minute**, d
 |--------|------|--------|-------------|
 | `cloudflare_zone_hostname_requests` | gauge | zone, host | Total requests in the last completed minute |
 | `cloudflare_zone_hostname_requests_by_status` | gauge | zone, host, status | Requests by HTTP status code |
-| `cloudflare_zone_hostname_cache_status` | gauge | zone, host, cache_status | Requests by cache status (hit/miss/etc.) |
+| `cloudflare_zone_hostname_cache_status` | gauge | zone, host, cache_status | Eyeball requests by cache status (hit/miss/etc.) |
 
 **Latency (averages — primary alerting metrics):**
 
@@ -546,15 +557,15 @@ For mixed accounts (enterprise + free zones), only free zones are skipped—paid
 │   ▼            ▼      ▼            ▼      ▼            ▼                       │
 │ ┌─────┐    ┌─────┐  ┌─────┐    ┌─────┐  ┌─────┐    ┌─────┐                     │
 │ │Exprt│    │Exprt│  │Exprt│    │Exprt│  │Exprt│    │Exprt│                     │
-│ │(21) │ .. │(N)  │  │(21) │ .. │(N)  │  │(21) │ .. │(N)  │                     │
+│ │(22) │ .. │(N)  │  │(22) │ .. │(N)  │  │(22) │ .. │(N)  │                     │
 │ │acct │    │zone │  │acct │    │zone │  │acct │    │zone │                     │
 │ └─────┘    └─────┘  └─────┘    └─────┘  └─────┘    └─────┘                     │
 │                                                                                │
 │  MetricExporter DOs (per account):                                             │
-│  - Account-scoped (21): worker-totals, logpush-account, magic-transit,         │
+│  - Account-scoped (22): worker-totals, logpush-account, magic-transit,         │
 │    magic-transit-slo, magic-transit-traffic, magic-firewall-samples,           │
-│    network-analytics, stream-video-playback, stream-live-inputs,              │
-│    http-metrics, adaptive-metrics, edge-country-metrics,                      │
+│    network-analytics, stream-video-playback, stream-live-inputs, images,       │
+│    http-metrics, adaptive-metrics, edge-country-metrics,                       │
 │    colo-metrics, colo-error-metrics, request-method-metrics,                   │
 │    health-check-metrics, load-balancer-metrics, logpush-zone,                  │
 │    origin-status-metrics, cache-miss-metrics, hostname-http-metrics            │
@@ -666,7 +677,7 @@ For mixed accounts (enterprise + free zones), only free zones are skipped—paid
 │                                                                        │
 │  3. Push context to MetricExporter DOs:                                │
 │     ┌────────────────────────────────────────────────────────────────┐ │
-│     │ Account-scoped (21 exporters):                                 │ │
+│     │ Account-scoped (22 exporters):                                 │ │
 │     │   exporter.updateZoneContext(accountId, accountName, zones)    │ │
 │     │                                                                │ │
 │     │ Zone-scoped (N exporters, 1 per zone):                         │ │
@@ -683,8 +694,8 @@ For mixed accounts (enterprise + free zones), only free zones are skipped—paid
 ┌────────────────────────────────────────────────────────────────────────┐
 │           MetricExporter.refresh() for account-scoped queries          │
 │                                                                        │
-│  Query Types (21 total):                                               │
-│  ├── ACCOUNT-LEVEL (single account per query, 9):                      │
+│  Query Types (22 total):                                               │
+│  ├── ACCOUNT-LEVEL (single account per query, 10):                     │
 │  │   ├── worker-totals                                                 │
 │  │   ├── logpush-account                                               │
 │  │   ├── magic-transit                                                 │
@@ -693,7 +704,8 @@ For mixed accounts (enterprise + free zones), only free zones are skipped—paid
 │  │   ├── magic-firewall-samples                                        │
 │  │   ├── network-analytics                                             │
 │  │   ├── stream-video-playback                                         │
-│  │   └── stream-live-inputs                                            │
+│  │   ├── stream-live-inputs                                            │
+│  │   └── images                                                        │
 │  │                                                                     │
 │  └── ZONE-LEVEL (all zones batched in one query, 12):                  │
 │      ├── http-metrics                                                  │
