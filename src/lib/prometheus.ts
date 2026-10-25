@@ -132,7 +132,7 @@ export function* serializeToPrometheusChunks(
  * @param type Metric type (counter, gauge, etc.).
  * @returns Deduplicated array of metric values.
  */
-function aggregateByLabels(
+export function aggregateByLabels(
 	values: readonly { labels: Record<string, string>; value: number }[],
 	type: string,
 ): { labels: Record<string, string>; value: number }[] {
@@ -180,7 +180,7 @@ function labelSignature(labels: Record<string, string>): string {
  * @param exclude Set of label keys to exclude.
  * @returns Filtered labels object.
  */
-function filterLabels(
+export function filterLabels(
 	labels: Record<string, string>,
 	exclude: ReadonlySet<string>,
 ): Record<string, string> {

@@ -1,6 +1,13 @@
-import { Client, type CombinedError, fetchExchange } from "@urql/core";
+import {
+	Client,
+	type CombinedError,
+	fetchExchange,
+	makeOperation,
+	mapExchange,
+} from "@urql/core";
 import Cloudflare from "cloudflare";
 import DataLoader from "dataloader";
+import { type DocumentNode, visit } from "graphql";
 import z from "zod";
 import { ColumnarObservationSink } from "../lib/columnar-observations";
 import { GraphQLError } from "../lib/errors";
@@ -13,6 +20,7 @@ import {
 } from "../lib/logger";
 import type { MetricDefinition } from "../lib/metrics";
 import type { ColumnarMetricSource } from "../lib/packed-columnar-metric";
+import { aggregateByLabels, filterLabels } from "../lib/prometheus";
 import { getEnvDefaults } from "../lib/runtime-config";
 import type {
 	Account,
@@ -169,6 +177,7 @@ export type CloudflareMetricsClientConfig = Readonly<{
 	timeWindowSeconds: number;
 	loggerConfig?: LoggerConfig;
 	fetch?: typeof globalThis.fetch;
+	omitHostDimension?: boolean;
 }>;
 
 /**
@@ -185,6 +194,21 @@ export type HttpMetricsInput = Readonly<{
 // Workers-compatible batch scheduler
 const batchScheduleFn = (cb: () => void) => queueMicrotask(cb);
 
+const hostlessQueries = new WeakMap<DocumentNode, DocumentNode>();
+
+// Grouping by host overflows the row limit on busy zones, truncating every total.
+function withoutHostDimension(query: DocumentNode): DocumentNode {
+	let hostless = hostlessQueries.get(query);
+	if (!hostless) {
+		hostless = visit(query, {
+			Field: (node) =>
+				node.name.value === "clientRequestHTTPHost" ? null : undefined,
+		});
+		hostlessQueries.set(query, hostless);
+	}
+	return hostless;
+}
+
 /**
  * Client for fetching Cloudflare metrics via GraphQL and REST APIs.
  * Supports both account-level and zone-level queries with batching via DataLoader.
@@ -194,6 +218,7 @@ export class CloudflareMetricsClient {
 	private readonly gql: Client;
 	private readonly config: CloudflareMetricsClientConfig;
 	private readonly logger: Logger;
+	private hostlessClient?: CloudflareMetricsClient;
 
 	// DataLoader for batched parallel REST calls (firewall rules benefit from
 	// batching in AccountMetricCoordinator where Promise.all fires multiple calls)
@@ -210,7 +235,18 @@ export class CloudflareMetricsClient {
 		this.gql = new Client({
 			url: CLOUDFLARE_GQL_URL,
 			preferGetMethod: false,
-			exchanges: [fetchExchange],
+			exchanges: config.omitHostDimension
+				? [
+						mapExchange({
+							onOperation: (operation) =>
+								makeOperation(operation.kind, {
+									...operation,
+									query: withoutHostDimension(operation.query),
+								}),
+						}),
+						fetchExchange,
+					]
+				: [fetchExchange],
 			fetch: config.fetch,
 			fetchOptions() {
 				return {
@@ -1491,10 +1527,62 @@ export class CloudflareMetricsClient {
 	 * @param hostMetricsDelaySeconds Ingestion delay override for hostname metrics.
 	 * @param httpStatusGroup Whether to group HTTP response statuses by class.
 	 * @param packedMetricStorage Whether packed storage is enabled, allowing reduced query selections.
+	 * @param excludeLabels Labels dropped before values are returned; rows that collide are merged.
 	 * @returns Promise of metric definitions for the zones.
 	 * @throws {Error} When unknown query type provided.
 	 */
 	async getZoneMetrics(
+		query: ZoneLevelQuery,
+		zoneIds: string[],
+		zones: Zone[],
+		firewallRules: Record<string, string>,
+		timeRange: TimeRange,
+		hostMetricsAllowlist?: ReadonlySet<string>,
+		hostMetricsDelaySeconds?: number,
+		httpStatusGroup = false,
+		packedMetricStorage = false,
+		excludeLabels?: ReadonlySet<string>,
+	): Promise<MetricDefinition[]> {
+		const metrics = await this.zoneQueryClient(excludeLabels).fetchZoneMetrics(
+			query,
+			zoneIds,
+			zones,
+			firewallRules,
+			timeRange,
+			hostMetricsAllowlist,
+			hostMetricsDelaySeconds,
+			httpStatusGroup,
+			packedMetricStorage,
+		);
+		if (excludeLabels === undefined || excludeLabels.size === 0) {
+			return metrics;
+		}
+		return metrics.map((metric) => ({
+			...metric,
+			values: aggregateByLabels(
+				metric.values.map((value) => ({
+					labels: filterLabels(value.labels, excludeLabels),
+					value: value.value,
+				})),
+				metric.type,
+			),
+		}));
+	}
+
+	private zoneQueryClient(
+		excludeLabels?: ReadonlySet<string>,
+	): CloudflareMetricsClient {
+		if (!excludeLabels?.has("host") || this.config.omitHostDimension) {
+			return this;
+		}
+		this.hostlessClient ??= new CloudflareMetricsClient({
+			...this.config,
+			omitHostDimension: true,
+		});
+		return this.hostlessClient;
+	}
+
+	private async fetchZoneMetrics(
 		query: ZoneLevelQuery,
 		zoneIds: string[],
 		zones: Zone[],
@@ -1622,9 +1710,10 @@ export class CloudflareMetricsClient {
 		hostMetricsAllowlist?: ReadonlySet<string>,
 		hostMetricsDelaySeconds?: number,
 		httpStatusGroup = false,
+		excludeLabels?: ReadonlySet<string>,
 	): Promise<ColumnarMetricSource[]> {
-		const observationSink = new ColumnarObservationSink();
-		await this.getZoneMetrics(
+		const observationSink = new ColumnarObservationSink(excludeLabels);
+		await this.zoneQueryClient(excludeLabels).fetchZoneMetrics(
 			query,
 			zoneIds,
 			zones,

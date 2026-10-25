@@ -702,6 +702,8 @@ export class MetricExporter extends DurableObject<Env> {
 		if (isZoneLevelQuery(queryName)) {
 			const usePackedStorage =
 				isPackedMetricQuery(queryName) && config.packedMetricStorage;
+			// Dropping host at ingest keeps per-host series from ageing out of summed counters.
+			const excludeLabels = config.excludeHost ? new Set(["host"]) : undefined;
 			// Hostname metrics guardrails: parse allowlist once for both guard + query
 			let hostMetricsAllowlist: ReadonlySet<string> | undefined;
 			let hostMetricsDelaySeconds: number | undefined;
@@ -771,6 +773,7 @@ export class MetricExporter extends DurableObject<Env> {
 							hostMetricsAllowlist,
 							hostMetricsDelaySeconds,
 							config.httpStatusGroup,
+							excludeLabels,
 						),
 						partialErrors: [],
 						failedScopes: new Set(),
@@ -788,6 +791,7 @@ export class MetricExporter extends DurableObject<Env> {
 						hostMetricsDelaySeconds,
 						config.httpStatusGroup,
 						config.packedMetricStorage,
+						excludeLabels,
 					),
 					partialErrors: [],
 					failedScopes: new Set(),
@@ -838,6 +842,7 @@ export class MetricExporter extends DurableObject<Env> {
 								hostMetricsAllowlist,
 								hostMetricsDelaySeconds,
 								config.httpStatusGroup,
+								excludeLabels,
 							)),
 						];
 					} else {
@@ -852,6 +857,7 @@ export class MetricExporter extends DurableObject<Env> {
 								hostMetricsDelaySeconds,
 								config.httpStatusGroup,
 								config.packedMetricStorage,
+								excludeLabels,
 							),
 						);
 					}
