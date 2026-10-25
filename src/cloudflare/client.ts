@@ -177,7 +177,7 @@ export type CloudflareMetricsClientConfig = Readonly<{
 	timeWindowSeconds: number;
 	loggerConfig?: LoggerConfig;
 	fetch?: typeof globalThis.fetch;
-	omitHostDimension?: boolean;
+	omittedDimensions?: readonly string[];
 }>;
 
 /**
@@ -194,19 +194,37 @@ export type HttpMetricsInput = Readonly<{
 // Workers-compatible batch scheduler
 const batchScheduleFn = (cb: () => void) => queueMicrotask(cb);
 
-const hostlessQueries = new WeakMap<DocumentNode, DocumentNode>();
+const DIMENSION_FIELDS: Readonly<Record<string, string>> = {
+	host: "clientRequestHTTPHost",
+	country: "clientCountryName",
+};
 
-// Grouping by host overflows the row limit on busy zones, truncating every total.
-function withoutHostDimension(query: DocumentNode): DocumentNode {
-	let hostless = hostlessQueries.get(query);
-	if (!hostless) {
-		hostless = visit(query, {
-			Field: (node) =>
-				node.name.value === "clientRequestHTTPHost" ? null : undefined,
-		});
-		hostlessQueries.set(query, hostless);
+const strippedQueries = new WeakMap<DocumentNode, Map<string, DocumentNode>>();
+
+// Grouping by host or country overflows the row limit on busy zones, truncating every total.
+function withoutDimensions(
+	query: DocumentNode,
+	fields: readonly string[],
+): DocumentNode {
+	const key = fields.join(",");
+	let byFields = strippedQueries.get(query);
+	if (!byFields) {
+		byFields = new Map();
+		strippedQueries.set(query, byFields);
 	}
-	return hostless;
+	let stripped = byFields.get(key);
+	if (!stripped) {
+		stripped = visit(query, {
+			Field: {
+				enter: (node) => (fields.includes(node.name.value) ? null : undefined),
+				// A selection left empty is invalid GraphQL.
+				leave: (node) =>
+					node.selectionSet?.selections.length === 0 ? null : undefined,
+			},
+		});
+		byFields.set(key, stripped);
+	}
+	return stripped;
 }
 
 /**
@@ -218,7 +236,7 @@ export class CloudflareMetricsClient {
 	private readonly gql: Client;
 	private readonly config: CloudflareMetricsClientConfig;
 	private readonly logger: Logger;
-	private hostlessClient?: CloudflareMetricsClient;
+	private readonly strippedClients = new Map<string, CloudflareMetricsClient>();
 
 	// DataLoader for batched parallel REST calls (firewall rules benefit from
 	// batching in AccountMetricCoordinator where Promise.all fires multiple calls)
@@ -232,21 +250,26 @@ export class CloudflareMetricsClient {
 			fetch: config.fetch,
 		});
 
+		const omittedDimensions = config.omittedDimensions ?? [];
 		this.gql = new Client({
 			url: CLOUDFLARE_GQL_URL,
 			preferGetMethod: false,
-			exchanges: config.omitHostDimension
-				? [
-						mapExchange({
-							onOperation: (operation) =>
-								makeOperation(operation.kind, {
-									...operation,
-									query: withoutHostDimension(operation.query),
-								}),
-						}),
-						fetchExchange,
-					]
-				: [fetchExchange],
+			exchanges:
+				omittedDimensions.length > 0
+					? [
+							mapExchange({
+								onOperation: (operation) =>
+									makeOperation(operation.kind, {
+										...operation,
+										query: withoutDimensions(
+											operation.query,
+											omittedDimensions,
+										),
+									}),
+							}),
+							fetchExchange,
+						]
+					: [fetchExchange],
 			fetch: config.fetch,
 			fetchOptions() {
 				return {
@@ -1572,14 +1595,22 @@ export class CloudflareMetricsClient {
 	private zoneQueryClient(
 		excludeLabels?: ReadonlySet<string>,
 	): CloudflareMetricsClient {
-		if (!excludeLabels?.has("host") || this.config.omitHostDimension) {
+		const fields = Object.entries(DIMENSION_FIELDS)
+			.filter(([label]) => excludeLabels?.has(label))
+			.map(([, field]) => field);
+		if (fields.length === 0 || this.config.omittedDimensions) {
 			return this;
 		}
-		this.hostlessClient ??= new CloudflareMetricsClient({
-			...this.config,
-			omitHostDimension: true,
-		});
-		return this.hostlessClient;
+		const key = fields.join(",");
+		let client = this.strippedClients.get(key);
+		if (!client) {
+			client = new CloudflareMetricsClient({
+				...this.config,
+				omittedDimensions: fields,
+			});
+			this.strippedClients.set(key, client);
+		}
+		return client;
 	}
 
 	private async fetchZoneMetrics(

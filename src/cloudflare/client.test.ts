@@ -589,5 +589,94 @@ describe("CloudflareMetricsClient", () => {
 			expect(family?.direct?.labels).not.toContain("host");
 			expect(family?.direct?.zones.get("example.com")?.values).toEqual([7]);
 		});
+
+		it.each([
+			["origin-status-metrics", ["country"]],
+			["adaptive-metrics", ["country"]],
+			["http-metrics", ["country"]],
+			["edge-country-metrics", ["country"]],
+			["cache-miss-metrics", ["host", "country"]],
+		] as const)("stops grouping %s by %j", async (query, labels) => {
+			const queries: string[] = [];
+			const client = createClient(async (input, init) => {
+				const body = z
+					.object({ query: z.string() })
+					.parse(await new Request(input, init).json());
+				queries.push(body.query);
+				return Response.json({ data: { viewer: { zones: [] } } });
+			});
+
+			await client.getZoneMetrics(
+				query,
+				["zone-id"],
+				[paidZone],
+				{},
+				oneMinute,
+				undefined,
+				undefined,
+				false,
+				false,
+				new Set(labels),
+			);
+
+			const fields: string[] = [];
+			const emptiedObjects: string[] = [];
+			for (const sent of queries) {
+				visit(parse(sent), {
+					Field(node) {
+						fields.push(node.name.value);
+						if (node.name.value === "dimensions" && !node.selectionSet) {
+							emptiedObjects.push(node.name.value);
+						}
+					},
+				});
+			}
+			expect(fields).toContain("count");
+			expect(fields).not.toContain("clientCountryName");
+			expect(emptiedObjects).toEqual([]);
+		});
+
+		it("sums counters across countries", async () => {
+			const client = createClient(async () =>
+				Response.json({
+					data: {
+						viewer: {
+							zones: [
+								{
+									zoneTag: "zone-id",
+									httpRequestsAdaptiveGroups: [
+										{
+											count: 2,
+											dimensions: { originResponseStatus: 200 },
+										},
+										{
+											count: 5,
+											dimensions: { originResponseStatus: 200 },
+										},
+									],
+								},
+							],
+						},
+					},
+				}),
+			);
+
+			const metrics = await client.getZoneMetrics(
+				"origin-status-metrics",
+				["zone-id"],
+				[paidZone],
+				{},
+				oneMinute,
+				undefined,
+				undefined,
+				false,
+				false,
+				new Set(["host", "country"]),
+			);
+
+			expect(metrics[0]?.values).toEqual([
+				{ labels: { zone: "example.com", origin_status: "200" }, value: 7 },
+			]);
+		});
 	});
 });

@@ -38,7 +38,11 @@ import {
 	createPrometheusStream,
 	serializeToPrometheusChunks,
 } from "../lib/prometheus";
-import { getConfig, type ResolvedConfig } from "../lib/runtime-config";
+import {
+	excludedLabels,
+	getConfig,
+	type ResolvedConfig,
+} from "../lib/runtime-config";
 import { getTimeRange } from "../lib/time";
 import {
 	CounterStateSchema,
@@ -702,8 +706,8 @@ export class MetricExporter extends DurableObject<Env> {
 		if (isZoneLevelQuery(queryName)) {
 			const usePackedStorage =
 				isPackedMetricQuery(queryName) && config.packedMetricStorage;
-			// Dropping host at ingest keeps per-host series from ageing out of summed counters.
-			const excludeLabels = config.excludeHost ? new Set(["host"]) : undefined;
+			// Dropping labels at ingest keeps per-label series from ageing out of summed counters.
+			const excludeLabels = excludedLabels(config);
 			// Hostname metrics guardrails: parse allowlist once for both guard + query
 			let hostMetricsAllowlist: ReadonlySet<string> | undefined;
 			let hostMetricsDelaySeconds: number | undefined;

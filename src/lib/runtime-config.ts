@@ -27,6 +27,7 @@ export const ConfigKeySchema = z.enum([
 	"metricsDenylist",
 	// Output options
 	"excludeHost",
+	"excludeCountry",
 	"httpStatusGroup",
 	"packedMetricStorage",
 	// Deprecated alias for packedMetricStorage, still accepted for rollbacks
@@ -60,6 +61,7 @@ const ConfigValueSchemas = {
 	cfFreeTierAccounts: z.string(),
 	metricsDenylist: z.string(),
 	excludeHost: z.boolean(),
+	excludeCountry: z.boolean(),
 	httpStatusGroup: z.boolean(),
 	packedMetricStorage: z.boolean(),
 	coloMetricsPackedStorage: z.boolean(),
@@ -92,6 +94,7 @@ export const ConfigOverridesSchema = z
 		cfFreeTierAccounts: ConfigValueSchemas.cfFreeTierAccounts.optional(),
 		metricsDenylist: ConfigValueSchemas.metricsDenylist.optional(),
 		excludeHost: ConfigValueSchemas.excludeHost.optional(),
+		excludeCountry: ConfigValueSchemas.excludeCountry.optional(),
 		httpStatusGroup: ConfigValueSchemas.httpStatusGroup.optional(),
 		packedMetricStorage: ConfigValueSchemas.packedMetricStorage.optional(),
 		coloMetricsPackedStorage:
@@ -128,6 +131,7 @@ export const ResolvedConfigSchema = z
 		cfFreeTierAccounts: ConfigValueSchemas.cfFreeTierAccounts,
 		metricsDenylist: ConfigValueSchemas.metricsDenylist,
 		excludeHost: ConfigValueSchemas.excludeHost,
+		excludeCountry: ConfigValueSchemas.excludeCountry,
 		httpStatusGroup: ConfigValueSchemas.httpStatusGroup,
 		packedMetricStorage: ConfigValueSchemas.packedMetricStorage,
 		coloMetricsPackedStorage: ConfigValueSchemas.coloMetricsPackedStorage,
@@ -151,6 +155,7 @@ type OptionalEnvVars = {
 	CF_FREE_TIER_ACCOUNTS?: string;
 	HEALTH_CHECK_CACHE_TTL_SECONDS?: string;
 	HOST_METRICS_ALLOWLIST?: string;
+	EXCLUDE_COUNTRY?: string | boolean;
 	PACKED_METRIC_STORAGE?: string;
 	/** Deprecated alias for PACKED_METRIC_STORAGE. */
 	COLO_METRICS_PACKED_STORAGE?: string;
@@ -218,6 +223,7 @@ export function getEnvDefaults(env: Env): ResolvedConfig {
 		cfFreeTierAccounts: optionalEnv.CF_FREE_TIER_ACCOUNTS?.trim() ?? "",
 		metricsDenylist: optionalEnv.METRICS_DENYLIST?.trim() ?? "",
 		excludeHost: z.coerce.boolean().catch(false).parse(env.EXCLUDE_HOST),
+		excludeCountry: parseOptionalBoolean(optionalEnv.EXCLUDE_COUNTRY) ?? false,
 		httpStatusGroup: z.coerce
 			.boolean()
 			.catch(false)
@@ -317,6 +323,7 @@ function mergeConfig(
 			overrides.cfFreeTierAccounts ?? defaults.cfFreeTierAccounts,
 		metricsDenylist: overrides.metricsDenylist ?? defaults.metricsDenylist,
 		excludeHost: overrides.excludeHost ?? defaults.excludeHost,
+		excludeCountry: overrides.excludeCountry ?? defaults.excludeCountry,
 		httpStatusGroup: overrides.httpStatusGroup ?? defaults.httpStatusGroup,
 		packedMetricStorage,
 		coloMetricsPackedStorage: packedMetricStorage,
@@ -427,4 +434,19 @@ export async function resetConfigKey(
 export async function resetAllConfig(env: Env): Promise<ResolvedConfig> {
 	await env.CONFIG_KV.delete(KV_KEY);
 	return getEnvDefaults(env);
+}
+
+/**
+ * Labels dropped from zone metrics, both from the GraphQL grouping and at ingest.
+ *
+ * @param config Resolved configuration.
+ * @returns Excluded label names, or undefined when none are excluded.
+ */
+export function excludedLabels(
+	config: Pick<ResolvedConfig, "excludeHost" | "excludeCountry">,
+): ReadonlySet<string> | undefined {
+	const labels = new Set<string>();
+	if (config.excludeHost) labels.add("host");
+	if (config.excludeCountry) labels.add("country");
+	return labels.size > 0 ? labels : undefined;
 }
