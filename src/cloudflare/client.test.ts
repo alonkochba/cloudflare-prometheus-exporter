@@ -496,6 +496,57 @@ describe("CloudflareMetricsClient", () => {
 				},
 			});
 
+		it.each([
+			["origin-status-metrics", false],
+			["colo-metrics", false],
+			["colo-metrics", true],
+			["cache-miss-metrics", true],
+		] as const)("stops grouping %s by host (packed=%s)", async (query, packed) => {
+			const fields: string[] = [];
+			const client = createClient(async (input, init) => {
+				const body = z
+					.object({ query: z.string() })
+					.parse(await new Request(input, init).json());
+				visit(parse(body.query), {
+					Field(node) {
+						fields.push(node.name.value);
+					},
+				});
+				return Response.json({ data: { viewer: { zones: [] } } });
+			});
+			const hostless = new Set(["host"]);
+
+			if (packed) {
+				await client.getPackedZoneMetrics(
+					query,
+					["zone-id"],
+					[paidZone],
+					{},
+					oneMinute,
+					undefined,
+					undefined,
+					false,
+					hostless,
+				);
+			} else {
+				await client.getZoneMetrics(
+					query,
+					["zone-id"],
+					[paidZone],
+					{},
+					oneMinute,
+					undefined,
+					undefined,
+					false,
+					false,
+					hostless,
+				);
+			}
+
+			expect(fields).toContain("count");
+			expect(fields).not.toContain("clientRequestHTTPHost");
+		});
+
 		it("sums counters across the dropped label", async () => {
 			const client = createClient(async () => originStatusResponse());
 

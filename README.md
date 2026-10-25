@@ -54,7 +54,7 @@ Set in `wrangler.jsonc` or via `wrangler secret put`:
 | `ZONE_LIST_CACHE_TTL_SECONDS` | 1800 | Zone list cache TTL |
 | `SSL_CERTS_CACHE_TTL_SECONDS` | 1800 | SSL cert cache TTL |
 | `HEALTH_CHECK_CACHE_TTL_SECONDS` | 10 | Health check cache TTL |
-| `EXCLUDE_HOST` | false | Drop host labels when metrics are ingested; per-host rows are merged (counters summed) |
+| `EXCLUDE_HOST` | false | Drop host labels: zone queries stop grouping by host, so busy zones stay under `QUERY_LIMIT` |
 | `CF_HTTP_STATUS_GROUP` | false | Group HTTP status codes (2xx, 4xx, etc.) |
 | `PACKED_METRIC_STORAGE` | false | Enable compact storage and chunked output for zone metrics. Accepts the deprecated name `COLO_METRICS_PACKED_STORAGE`. |
 | `DISABLE_UI` | false | Disable landing page (returns 404) |
