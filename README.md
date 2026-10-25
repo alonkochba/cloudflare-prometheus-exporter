@@ -221,6 +221,7 @@ curl -X DELETE https://your-worker.workers.dev/config
 | `cloudflare_zone_requests_ssl_protocol_total` | counter | zone, ssl_protocol |
 | `cloudflare_zone_requests_http_version_total` | counter | zone, http_version |
 | `cloudflare_zone_requests_origin_status_country_host_total` | counter | zone, origin_status, country, host |
+| `cloudflare_zone_origin_requests_total` | counter | zone, origin_status, cache_status |
 | `cloudflare_zone_requests_status_country_host_total` | counter | zone, edge_status, country, host |
 | `cloudflare_zone_requests_by_method_total` | counter | zone, method |
 

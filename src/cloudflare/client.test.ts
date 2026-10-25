@@ -137,6 +137,76 @@ describe("CloudflareMetricsClient", () => {
 		]);
 	});
 
+	it("exports requests to origin per zone", async () => {
+		const client = createClient(async () =>
+			Response.json({
+				data: {
+					viewer: {
+						zones: [
+							{
+								zoneTag: "zone-id",
+								httpRequestsAdaptiveGroups: [],
+								originRequests: [
+									{
+										count: 4,
+										dimensions: {
+											originResponseStatus: 200,
+											cacheStatus: "miss",
+										},
+									},
+									{
+										count: 0,
+										dimensions: {
+											originResponseStatus: 503,
+											cacheStatus: "dynamic",
+										},
+									},
+								],
+							},
+						],
+					},
+				},
+			}),
+		);
+
+		const metrics = await client.getZoneMetrics(
+			"origin-status-metrics",
+			["zone-id"],
+			[
+				{
+					id: "zone-id",
+					name: "example.com",
+					status: "active",
+					plan: { id: "paid", name: "Paid" },
+					account: { id: "account-id", name: "Account" },
+				},
+			],
+			{},
+			{
+				mintime: "2026-01-01T00:00:00.000Z",
+				maxtime: "2026-01-01T00:01:00.000Z",
+			},
+		);
+
+		expect(metrics).toEqual([
+			{
+				name: "cloudflare_zone_origin_requests_total",
+				help: "Requests sent to origin by origin status and cache status",
+				type: "counter",
+				values: [
+					{
+						labels: {
+							zone: "example.com",
+							origin_status: "200",
+							cache_status: "miss",
+						},
+						value: 4,
+					},
+				],
+			},
+		]);
+	});
+
 	it.each([
 		false,
 		true,

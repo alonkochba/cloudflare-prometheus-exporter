@@ -763,6 +763,20 @@ export const OriginStatusMetricsQuery = graphql(`
             clientRequestHTTPHost
           }
         }
+        originRequests: httpRequestsAdaptiveGroups(
+          limit: $limit
+          filter: {
+            datetime_geq: $mintime
+            datetime_lt: $maxtime
+            originResponseStatus_gt: 0
+          }
+        ) {
+          count
+          dimensions {
+            originResponseStatus
+            cacheStatus
+          }
+        }
       }
     }
   }

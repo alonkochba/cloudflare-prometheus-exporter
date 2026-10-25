@@ -149,7 +149,7 @@ const WORKER_METRICS = {
 // | `LogpushAccountMetricsQuery` | 1 | Account logpush |
 // | `LogpushZoneMetricsQuery` | 1 | Zone logpush |
 // | `MagicTransitMetricsQuery` | 4 | Tunnel health (active/healthy/failures/colos) |
-// | `OriginStatusMetricsQuery` | 1 | Origin status by country/host |
+// | `OriginStatusMetricsQuery` | 2 | Origin status by country/host; requests to origin |
 //
 // | SDK Call | Metrics | Notes |
 // |----------|---------|-------|
@@ -3261,7 +3261,7 @@ export class CloudflareMetricsClient {
 	}
 
 	/**
-	 * Origin responses by status, country, and host.
+	 * Origin responses by status, country, and host, and requests sent to origin.
 	 *
 	 * @param zoneIds Zone IDs to query.
 	 * @param zones Zone metadata for label mapping.
@@ -3292,7 +3292,13 @@ export class CloudflareMetricsClient {
 			type: "counter",
 			values: [],
 		};
-		observationSink?.capture([originStatusCountryHost]);
+		const originRequests: MetricDefinition = {
+			name: "cloudflare_zone_origin_requests_total",
+			help: "Requests sent to origin by origin status and cache status",
+			type: "counter",
+			values: [],
+		};
+		observationSink?.capture([originStatusCountryHost, originRequests]);
 
 		for (const zoneData of result.data?.viewer?.zones ?? []) {
 			const zoneName = findZoneName(zoneData.zoneTag, zones);
@@ -3312,11 +3318,26 @@ export class CloudflareMetricsClient {
 					});
 				}
 			}
+
+			for (const group of zoneData.originRequests ?? []) {
+				if (group.count != null && group.count > 0) {
+					originRequests.values.push({
+						labels: {
+							zone: zoneName,
+							origin_status: String(
+								group.dimensions?.originResponseStatus ?? 0,
+							),
+							cache_status: group.dimensions?.cacheStatus ?? "",
+						},
+						value: group.count,
+					});
+				}
+			}
 		}
 
-		return originStatusCountryHost.values.length > 0
-			? [originStatusCountryHost]
-			: [];
+		return [originStatusCountryHost, originRequests].filter(
+			(m) => m.values.length > 0,
+		);
 	}
 
 	/**
