@@ -16,7 +16,11 @@ import {
 	type PackedMetricQuery,
 } from "../lib/packed-metric-state";
 import { createPrometheusStream } from "../lib/prometheus";
-import { getConfig, type ResolvedConfig } from "../lib/runtime-config";
+import {
+	excludedLabels,
+	getConfig,
+	type ResolvedConfig,
+} from "../lib/runtime-config";
 import { getTimeRange } from "../lib/time";
 import type { MetricExporterIdString, Zone } from "../lib/types";
 import { MetricExporter } from "./MetricExporter";
@@ -454,7 +458,7 @@ export class AccountMetricCoordinator extends DurableObject<Env> {
 		logger: Logger,
 	): AsyncGenerator<Uint8Array, void> {
 		const denylist = [...parseCommaSeparated(config.metricsDenylist)];
-		const excludeLabels = config.excludeHost ? ["host"] : [];
+		const excludeLabels = [...(excludedLabels(config) ?? [])];
 		for (const descriptor of exports) {
 			let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 			let completed = false;

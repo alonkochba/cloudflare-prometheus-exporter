@@ -55,6 +55,7 @@ Set in `wrangler.jsonc` or via `wrangler secret put`:
 | `SSL_CERTS_CACHE_TTL_SECONDS` | 1800 | SSL cert cache TTL |
 | `HEALTH_CHECK_CACHE_TTL_SECONDS` | 10 | Health check cache TTL |
 | `EXCLUDE_HOST` | false | Drop host labels: zone queries stop grouping by host, so busy zones stay under `QUERY_LIMIT` |
+| `EXCLUDE_COUNTRY` | false | Drop country labels the same way. `*_country_total` families collapse to one series per zone |
 | `CF_HTTP_STATUS_GROUP` | false | Group HTTP status codes (2xx, 4xx, etc.) |
 | `PACKED_METRIC_STORAGE` | false | Enable compact storage and chunked output for zone metrics. Accepts the deprecated name `COLO_METRICS_PACKED_STORAGE`. |
 | `DISABLE_UI` | false | Disable landing page (returns 404) |
@@ -156,6 +157,7 @@ Override configuration at runtime without redeployment. Overrides persist in KV 
 | `cfFreeTierAccounts` | string | Comma-separated free tier account IDs |
 | `metricsDenylist` | string | Comma-separated metrics to exclude |
 | `excludeHost` | boolean | Exclude host labels |
+| `excludeCountry` | boolean | Exclude country labels |
 | `httpStatusGroup` | boolean | Group HTTP status codes |
 | `packedMetricStorage` | boolean | Enable compact by-zone storage and chunked read output for supported high-cardinality queries, including edge-country, health-check, and hostname HTTP metrics |
 | `coloMetricsPackedStorage` | boolean | Deprecated alias for `packedMetricStorage` |
@@ -200,7 +202,7 @@ curl -X DELETE https://your-worker.workers.dev/config
 - Enabling packed storage migrates active and retained counters before adding the next window. Disabling deletes packed snapshots and starts a fresh unpacked counter generation on the next refresh.
 - The storage mode is resolved once per scrape and applied to every account, so a scrape never mixes packed and unpacked output for the same metric family.
 - Each counter series stores its own retry checkpoint. Replaying the same query window is idempotent. Series not seen for five refreshes are dropped; until then they are exported with their last value (a flat counter), whereas the unpacked path stops exporting a series the moment it is absent.
-- When `excludeHost` is set, packed rows that collapse onto the same remaining labels are summed, matching the unpacked serializer.
+- When `excludeHost` or `excludeCountry` is set, packed rows that collapse onto the same remaining labels are summed, matching the unpacked serializer.
 - Packed queries keep their existing metric families. `colo-metrics` uses its reduced packed query, health checks use separate event and timing aliases, and hostname metrics preserve their four aliases and fixed one-minute window.
 - The 16 MiB serialized-state guard (`Chunked storage value exceeds the safe size limit`) still applies per query. Families with identical label columns share one copy, keeping high-cardinality multi-family queries such as `colo-metrics` within the guard.
 

@@ -9,7 +9,11 @@ import {
 	createPrometheusStream,
 	serializeToPrometheus,
 } from "../lib/prometheus";
-import { getConfig, type ResolvedConfig } from "../lib/runtime-config";
+import {
+	excludedLabels,
+	getConfig,
+	type ResolvedConfig,
+} from "../lib/runtime-config";
 import type { Account } from "../lib/types";
 import { AccountMetricCoordinator } from "./AccountMetricCoordinator";
 
@@ -277,7 +281,7 @@ export class MetricCoordinator extends DurableObject<Env> {
 		logger: Logger,
 	): AsyncGenerator<string, void> {
 		const metricsDenylist = parseCommaSeparated(config.metricsDenylist);
-		const excludeLabels = config.excludeHost ? new Set(["host"]) : undefined;
+		const excludeLabels = excludedLabels(config);
 		const packedMetricQueries = config.packedMetricStorage
 			? PACKED_METRIC_QUERIES
 			: [];

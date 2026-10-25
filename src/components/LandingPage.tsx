@@ -1185,6 +1185,27 @@ export const LandingPage: FC<Props> = ({ config }) => {
 										</div>
 										<div>
 											<label
+												for="cfg-excludeCountry"
+												class="block text-sm font-medium text-gray-700 mb-2"
+											>
+												Exclude Country Label
+											</label>
+											<div class="flex items-center justify-between">
+												<p class="text-xs text-gray-500">
+													Remove country labels from metrics
+												</p>
+												<button
+													type="button"
+													id="cfg-excludeCountry"
+													class="toggle-switch"
+													onclick="toggleSwitch('excludeCountry')"
+													role="switch"
+													aria-checked="false"
+												/>
+											</div>
+										</div>
+										<div>
+											<label
 												for="cfg-httpStatusGroup"
 												class="block text-sm font-medium text-gray-700 mb-2"
 											>
